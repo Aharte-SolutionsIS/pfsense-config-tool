@@ -3,7 +3,7 @@ Network-related data models for pfSense automation.
 """
 
 from typing import Optional, List, Dict, Any
-from pydantic import BaseModel, Field, validator, IPvAnyAddress
+from pydantic import BaseModel, Field, field_validator, IPvAnyAddress
 from ipaddress import IPv4Network, IPv4Address, AddressValueError
 from enum import Enum
 
@@ -44,7 +44,8 @@ class NetworkInterface(BaseModel):
     vlan_id: Optional[int] = Field(None, description="VLAN ID for VLAN interfaces")
     parent_interface: Optional[str] = Field(None, description="Parent interface for VLANs")
     
-    @validator('ip_address', 'gateway')
+    @field_validator('ip_address', 'gateway')
+    @classmethod
     def validate_ip_addresses(cls, v):
         if v is None:
             return v
@@ -54,7 +55,8 @@ class NetworkInterface(BaseModel):
         except Exception:
             raise ValueError(f"Invalid IP address: {v}")
     
-    @validator('vlan_id')
+    @field_validator('vlan_id')
+    @classmethod
     def validate_vlan_id(cls, v):
         if v is None:
             return v
@@ -62,7 +64,8 @@ class NetworkInterface(BaseModel):
             raise ValueError("VLAN ID must be between 1 and 4094")
         return v
     
-    @validator('mtu')
+    @field_validator('mtu')
+    @classmethod
     def validate_mtu(cls, v):
         if not 68 <= v <= 9000:
             raise ValueError("MTU must be between 68 and 9000")
@@ -78,7 +81,8 @@ class RouteConfig(BaseModel):
     metric: int = Field(default=1, description="Route metric")
     description: Optional[str] = Field(None, description="Route description")
     
-    @validator('destination')
+    @field_validator('destination')
+    @classmethod
     def validate_destination(cls, v):
         try:
             IPv4Network(v, strict=False)
@@ -86,7 +90,8 @@ class RouteConfig(BaseModel):
         except AddressValueError:
             raise ValueError(f"Invalid destination network: {v}")
     
-    @validator('gateway')
+    @field_validator('gateway')
+    @classmethod
     def validate_gateway(cls, v):
         try:
             IPvAnyAddress(v)
@@ -107,7 +112,8 @@ class DNSConfig(BaseModel):
     forwarding_enabled: bool = Field(default=False, description="Enable DNS forwarding")
     forwarders: List[str] = Field(default_factory=list, description="DNS forwarder addresses")
     
-    @validator('dns_servers', 'forwarders')
+    @field_validator('dns_servers', 'forwarders')
+    @classmethod
     def validate_dns_addresses(cls, v):
         for dns in v:
             try:
@@ -139,7 +145,8 @@ class DHCPPool(BaseModel):
     failover_peer: Optional[str] = Field(None, description="DHCP failover peer")
     ignore_client_uids: bool = Field(default=False, description="Ignore client UIDs")
     
-    @validator('start_ip', 'end_ip', 'subnet_mask', 'gateway')
+    @field_validator('start_ip', 'end_ip', 'subnet_mask', 'gateway')
+    @classmethod
     def validate_ip_addresses(cls, v):
         if v is None:
             return v
@@ -149,7 +156,8 @@ class DHCPPool(BaseModel):
         except Exception:
             raise ValueError(f"Invalid IP address: {v}")
     
-    @validator('dns_servers', 'ntp_servers')
+    @field_validator('dns_servers', 'ntp_servers')
+    @classmethod
     def validate_server_addresses(cls, v):
         for server in v:
             try:
@@ -167,14 +175,16 @@ class DHCPReservation(BaseModel):
     hostname: Optional[str] = Field(None, description="Client hostname")
     description: Optional[str] = Field(None, description="Reservation description")
     
-    @validator('mac_address')
+    @field_validator('mac_address')
+    @classmethod
     def validate_mac_address(cls, v):
         import re
         if not re.match(r'^([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})$', v):
             raise ValueError(f"Invalid MAC address format: {v}")
         return v.lower().replace('-', ':')
     
-    @validator('ip_address')
+    @field_validator('ip_address')
+    @classmethod
     def validate_ip_address(cls, v):
         try:
             IPvAnyAddress(v)
@@ -207,20 +217,23 @@ class NetworkSettings(BaseModel):
     web_gui_port: int = Field(default=443, description="Web GUI port")
     web_gui_protocol: str = Field(default="https", description="Web GUI protocol")
     
-    @validator('hostname')
+    @field_validator('hostname')
+    @classmethod
     def validate_hostname(cls, v):
         import re
         if not re.match(r'^[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?$', v):
             raise ValueError("Invalid hostname format")
         return v
     
-    @validator('ssh_port', 'web_gui_port')
+    @field_validator('ssh_port', 'web_gui_port')
+    @classmethod
     def validate_ports(cls, v):
         if not 1 <= v <= 65535:
             raise ValueError("Port must be between 1 and 65535")
         return v
     
-    @validator('web_gui_protocol')
+    @field_validator('web_gui_protocol')
+    @classmethod
     def validate_protocol(cls, v):
         if v.lower() not in ['http', 'https']:
             raise ValueError("Protocol must be 'http' or 'https'")

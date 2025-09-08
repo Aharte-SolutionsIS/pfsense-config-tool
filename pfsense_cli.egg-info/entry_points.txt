@@ -1,0 +1,3 @@
+[console_scripts]
+pfsense = pfsense_cli.cli.main:main
+pfsense-cli = pfsense_cli.cli.main:main

@@ -3,7 +3,7 @@ VPN-related data models for pfSense automation.
 """
 
 from typing import Optional, List, Dict, Any
-from pydantic import BaseModel, Field, validator, IPvAnyAddress
+from pydantic import BaseModel, Field, field_validator, IPvAnyAddress
 from ipaddress import IPv4Network, AddressValueError
 from enum import Enum
 
@@ -54,13 +54,15 @@ class CertificateConfig(BaseModel):
     digest_algorithm: str = Field(default="sha256", description="Digest algorithm")
     lifetime: int = Field(default=3650, description="Certificate lifetime in days")
     
-    @validator('key_length')
+    @field_validator('key_length')
+    @classmethod
     def validate_key_length(cls, v):
         if v not in [1024, 2048, 4096]:
             raise ValueError("Key length must be 1024, 2048, or 4096")
         return v
     
-    @validator('country')
+    @field_validator('country')
+    @classmethod
     def validate_country(cls, v):
         if len(v) != 2:
             raise ValueError("Country must be a 2-character code")
@@ -106,7 +108,8 @@ class OpenVPNServerConfig(BaseModel):
     ping_interval: int = Field(default=10, description="Ping interval in seconds")
     ping_timeout: int = Field(default=60, description="Ping timeout in seconds")
     
-    @validator('tunnel_network')
+    @field_validator('tunnel_network')
+    @classmethod
     def validate_tunnel_network(cls, v):
         try:
             IPv4Network(v, strict=False)
@@ -114,13 +117,15 @@ class OpenVPNServerConfig(BaseModel):
         except AddressValueError:
             raise ValueError(f"Invalid tunnel network: {v}")
     
-    @validator('port')
+    @field_validator('port')
+    @classmethod
     def validate_port(cls, v):
         if not 1 <= v <= 65535:
             raise ValueError("Port must be between 1 and 65535")
         return v
     
-    @validator('dns_servers')
+    @field_validator('dns_servers')
+    @classmethod
     def validate_dns_servers(cls, v):
         for dns in v:
             try:
@@ -157,7 +162,8 @@ class VPNClient(BaseModel):
     push_routes: List[str] = Field(default_factory=list, description="Client-specific routes")
     redirect_gateway: bool = Field(default=True, description="Redirect default gateway")
     
-    @validator('assigned_ip')
+    @field_validator('assigned_ip')
+    @classmethod
     def validate_assigned_ip(cls, v):
         if v is None:
             return v

@@ -3,7 +3,7 @@ Client configuration data models for pfSense automation.
 """
 
 from typing import Optional, List, Dict, Any
-from pydantic import BaseModel, Field, validator, IPvAnyAddress
+from pydantic import BaseModel, Field, field_validator, IPvAnyAddress
 from ipaddress import IPv4Network, AddressValueError
 from enum import Enum
 
@@ -32,7 +32,8 @@ class NetworkConfig(BaseModel):
     dns_servers: List[str] = Field(default_factory=list, description="DNS server addresses")
     domain_name: Optional[str] = Field(None, description="Domain name for the network")
     
-    @validator('network')
+    @field_validator('network')
+    @classmethod
     def validate_network(cls, v):
         try:
             IPv4Network(v, strict=False)
@@ -40,7 +41,8 @@ class NetworkConfig(BaseModel):
         except AddressValueError:
             raise ValueError(f"Invalid network CIDR format: {v}")
     
-    @validator('gateway')
+    @field_validator('gateway')
+    @classmethod
     def validate_gateway(cls, v):
         if v is None:
             return v
@@ -50,7 +52,8 @@ class NetworkConfig(BaseModel):
         except Exception:
             raise ValueError(f"Invalid gateway IP address: {v}")
     
-    @validator('dns_servers')
+    @field_validator('dns_servers')
+    @classmethod
     def validate_dns_servers(cls, v):
         for dns in v:
             try:
@@ -67,7 +70,8 @@ class VLANConfig(BaseModel):
     description: Optional[str] = Field(None, description="VLAN description")
     interface: str = Field(default="em0", description="Parent interface")
     
-    @validator('vlan_id')
+    @field_validator('vlan_id')
+    @classmethod
     def validate_vlan_id(cls, v):
         if not 1 <= v <= 4094:
             raise ValueError("VLAN ID must be between 1 and 4094")
@@ -83,7 +87,8 @@ class DHCPConfig(BaseModel):
     lease_time: int = Field(default=7200, description="DHCP lease time in seconds")
     static_mappings: List[Dict[str, str]] = Field(default_factory=list, description="Static DHCP mappings")
     
-    @validator('start_ip', 'end_ip')
+    @field_validator('start_ip', 'end_ip')
+    @classmethod
     def validate_ip_addresses(cls, v):
         if v is None:
             return v
@@ -104,7 +109,8 @@ class FirewallRule(BaseModel):
     port: Optional[str] = Field(None, description="Destination port or range")
     description: Optional[str] = Field(None, description="Rule description")
     
-    @validator('action')
+    @field_validator('action')
+    @classmethod
     def validate_action(cls, v):
         if v.lower() not in ['pass', 'block', 'reject']:
             raise ValueError("Action must be 'pass', 'block', or 'reject'")
@@ -121,7 +127,8 @@ class NATRule(BaseModel):
     internal_port: int = Field(..., description="Internal port")
     description: Optional[str] = Field(None, description="NAT rule description")
     
-    @validator('internal_ip')
+    @field_validator('internal_ip')
+    @classmethod
     def validate_internal_ip(cls, v):
         try:
             IPvAnyAddress(v)
@@ -156,7 +163,8 @@ class ClientConfig(BaseModel):
     tags: List[str] = Field(default_factory=list, description="Client tags")
     notes: Optional[str] = Field(None, description="Additional notes")
     
-    @validator('name')
+    @field_validator('name')
+    @classmethod
     def validate_name(cls, v):
         if not v or not v.strip():
             raise ValueError("Client name cannot be empty")
@@ -168,7 +176,8 @@ class ClientConfig(BaseModel):
             raise ValueError("Client name contains invalid characters")
         return v.strip()
     
-    @validator('vpn_port')
+    @field_validator('vpn_port')
+    @classmethod
     def validate_vpn_port(cls, v):
         if v is None:
             return v

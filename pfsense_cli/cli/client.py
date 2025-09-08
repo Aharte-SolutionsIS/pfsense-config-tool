@@ -8,11 +8,18 @@ from typing import List, Optional
 import click
 from tabulate import tabulate
 
-from ..models.client import ClientConfig, ClientType, ClientStatus
-from ..models.network import NetworkConfig, VLANConfig, DHCPConfig
+from ..models.client import ClientConfig, ClientType, ClientStatus, NetworkConfig, VLANConfig, DHCPConfig
 from ..api.exceptions import ClientNotFoundError, ClientAlreadyExistsError
 from ..utils.logging import get_logger, LogContext
-from .main import PfSenseContext, pass_context, _get_endpoints
+import click
+from .utils import get_endpoints
+
+# Use Click's built-in context passing
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    from .main import PfSenseContext
+
+pass_context = click.pass_obj
 
 logger = get_logger(__name__)
 
@@ -40,7 +47,7 @@ def client_group():
 @click.option('--vpn-port', type=int, help='VPN port assignment')
 @click.option('--dry-run', is_flag=True, help='Show what would be done without making changes')
 @pass_context
-def add_client(ctx: PfSenseContext, name: str, network: str, vlan: Optional[int], 
+def add_client(ctx, name: str, network: str, vlan: Optional[int], 
                client_type: str, template: Optional[str], gateway: Optional[str],
                dns: List[str], domain: Optional[str], dhcp: bool, 
                dhcp_start: Optional[str], dhcp_end: Optional[str],
@@ -72,11 +79,11 @@ def add_client(ctx: PfSenseContext, name: str, network: str, vlan: Optional[int]
                                     dns, domain, dhcp, dhcp_start, dhcp_end, vpn, vpn_port)
             
             if dry_run:
-                click.echo("✅ Dry run completed successfully. Use without --dry-run to apply changes.")
+                click.echo("[OK] Dry run completed successfully. Use without --dry-run to apply changes.")
                 return
             
             # Apply configuration to pfSense
-            endpoints = _get_endpoints(ctx)
+            endpoints = get_endpoints(ctx)
             client_config = ctx.config_manager.load_client_config(name)
             
             async def create_client():
@@ -84,16 +91,16 @@ def add_client(ctx: PfSenseContext, name: str, network: str, vlan: Optional[int]
             
             result = asyncio.run(create_client())
             
-            click.echo(f"✅ Client '{name}' created successfully!")
+            click.echo(f"[OK] Client '{name}' created successfully!")
             if ctx.verbose:
                 click.echo(f"Configuration saved to: {ctx.config_manager.clients_dir / f'{name}.yaml'}")
                 
     except ClientAlreadyExistsError as e:
-        click.echo(f"❌ {e}")
+        click.echo(f"[ERROR] {e}")
         sys.exit(1)
     except Exception as e:
         logger.error(f"Failed to add client '{name}': {e}")
-        click.echo(f"❌ Failed to add client: {e}")
+        click.echo(f"[ERROR] Failed to add client: {e}")
         sys.exit(1)
 
 
@@ -102,7 +109,7 @@ def add_client(ctx: PfSenseContext, name: str, network: str, vlan: Optional[int]
 @click.option('--force', is_flag=True, help='Skip confirmation prompt')
 @click.option('--keep-config', is_flag=True, help='Keep local configuration file')
 @pass_context
-def remove_client(ctx: PfSenseContext, name: str, force: bool, keep_config: bool):
+def remove_client(ctx, name: str, force: bool, keep_config: bool):
     """Remove a client configuration."""
     try:
         with LogContext(logger, client_name=name, operation='remove_client'):
@@ -111,7 +118,7 @@ def remove_client(ctx: PfSenseContext, name: str, force: bool, keep_config: bool
             try:
                 client_config = ctx.config_manager.load_client_config(name)
             except Exception:
-                click.echo(f"❌ Client '{name}' not found in local configuration")
+                click.echo(f"[ERROR] Client '{name}' not found in local configuration")
                 sys.exit(1)
             
             # Confirmation
@@ -127,7 +134,7 @@ def remove_client(ctx: PfSenseContext, name: str, force: bool, keep_config: bool
                     return
             
             # Remove from pfSense
-            endpoints = _get_endpoints(ctx)
+            endpoints = get_endpoints(ctx)
             
             async def delete_client():
                 return await endpoints.delete_client(name)
@@ -137,16 +144,16 @@ def remove_client(ctx: PfSenseContext, name: str, force: bool, keep_config: bool
             # Remove local configuration
             if not keep_config:
                 ctx.config_manager.delete_client_config(name, backup=True)
-                click.echo(f"✅ Client '{name}' removed successfully!")
+                click.echo(f"[OK] Client '{name}' removed successfully!")
             else:
-                click.echo(f"✅ Client '{name}' removed from pfSense (local config preserved)")
+                click.echo(f"[OK] Client '{name}' removed from pfSense (local config preserved)")
                 
     except ClientNotFoundError as e:
-        click.echo(f"❌ {e}")
+        click.echo(f"[ERROR] {e}")
         sys.exit(1)
     except Exception as e:
         logger.error(f"Failed to remove client '{name}': {e}")
-        click.echo(f"❌ Failed to remove client: {e}")
+        click.echo(f"[ERROR] Failed to remove client: {e}")
         sys.exit(1)
 
 
@@ -158,7 +165,7 @@ def remove_client(ctx: PfSenseContext, name: str, force: bool, keep_config: bool
               help='Filter by client type')
 @click.option('--show-details', is_flag=True, help='Show detailed information')
 @pass_context
-def list_clients(ctx: PfSenseContext, format: str, status: Optional[str], 
+def list_clients(ctx, format: str, status: Optional[str], 
                 client_type: Optional[str], show_details: bool):
     """List all configured clients."""
     try:
@@ -208,8 +215,8 @@ def list_clients(ctx: PfSenseContext, format: str, status: Optional[str],
                         client.status,
                         client.network.network,
                         client.vlan.vlan_id if client.vlan else 'N/A',
-                        '✅' if client.dhcp and client.dhcp.enabled else '❌',
-                        '✅' if client.vpn_enabled else '❌',
+                        '[OK]' if client.dhcp and client.dhcp.enabled else '[ERROR]',
+                        '[OK]' if client.vpn_enabled else '[ERROR]',
                         client.updated_at or 'Unknown'
                     ])
             else:
@@ -229,7 +236,7 @@ def list_clients(ctx: PfSenseContext, format: str, status: Optional[str],
             
     except Exception as e:
         logger.error(f"Failed to list clients: {e}")
-        click.echo(f"❌ Failed to list clients: {e}")
+        click.echo(f"[ERROR] Failed to list clients: {e}")
         sys.exit(1)
 
 
@@ -237,7 +244,7 @@ def list_clients(ctx: PfSenseContext, format: str, status: Optional[str],
 @click.argument('name')
 @click.option('--format', type=click.Choice(['table', 'json', 'yaml']), default='table')
 @pass_context
-def client_status(ctx: PfSenseContext, name: str, format: str):
+def client_status(ctx, name: str, format: str):
     """Show detailed status for a specific client."""
     try:
         with LogContext(logger, client_name=name, operation='client_status'):
@@ -246,11 +253,11 @@ def client_status(ctx: PfSenseContext, name: str, format: str):
             try:
                 client_config = ctx.config_manager.load_client_config(name)
             except Exception:
-                click.echo(f"❌ Client '{name}' not found in local configuration")
+                click.echo(f"[ERROR] Client '{name}' not found in local configuration")
                 sys.exit(1)
             
             # Get live status from pfSense
-            endpoints = _get_endpoints(ctx)
+            endpoints = get_endpoints(ctx)
             
             async def get_status():
                 try:
@@ -307,7 +314,7 @@ def client_status(ctx: PfSenseContext, name: str, format: str):
                 if client_config.nat_rules:
                     click.echo(f"NAT Rules: {len(client_config.nat_rules)}")
                 
-                click.echo(f"\nRemote Status: {'✅ Found' if remote_client else '❌ Not found'}")
+                click.echo(f"\nRemote Status: {'[OK] Found' if remote_client else '[ERROR] Not found'}")
                 
                 if client_config.created_at:
                     click.echo(f"Created: {client_config.created_at}")
@@ -316,7 +323,7 @@ def client_status(ctx: PfSenseContext, name: str, format: str):
                 
     except Exception as e:
         logger.error(f"Failed to get client status '{name}': {e}")
-        click.echo(f"❌ Failed to get client status: {e}")
+        click.echo(f"[ERROR] Failed to get client status: {e}")
         sys.exit(1)
 
 
@@ -330,7 +337,7 @@ def client_status(ctx: PfSenseContext, name: str, format: str):
 @click.option('--enable-vpn/--disable-vpn', help='Enable/disable VPN')
 @click.option('--vpn-port', type=int, help='VPN port assignment')
 @pass_context
-def update_client(ctx: PfSenseContext, name: str, status: Optional[str], 
+def update_client(ctx, name: str, status: Optional[str], 
                  gateway: Optional[str], dns: List[str], 
                  dhcp_start: Optional[str], dhcp_end: Optional[str],
                  enable_vpn: Optional[bool], vpn_port: Optional[int]):
@@ -368,7 +375,7 @@ def update_client(ctx: PfSenseContext, name: str, status: Optional[str],
             # Validate updated config
             errors = ctx.config_manager.validate_config(client_config.dict())
             if errors:
-                click.echo("❌ Configuration validation failed:")
+                click.echo("[ERROR] Configuration validation failed:")
                 for error in errors:
                     click.echo(f"  - {error}")
                 sys.exit(1)
@@ -377,31 +384,31 @@ def update_client(ctx: PfSenseContext, name: str, status: Optional[str],
             ctx.config_manager.save_client_config(client_config)
             
             # Update remote configuration
-            endpoints = _get_endpoints(ctx)
+            endpoints = get_endpoints(ctx)
             
             async def update_client():
                 return await endpoints.update_client(name, client_config)
             
             asyncio.run(update_client())
             
-            click.echo(f"✅ Client '{name}' updated successfully!")
+            click.echo(f"[OK] Client '{name}' updated successfully!")
             
     except Exception as e:
         logger.error(f"Failed to update client '{name}': {e}")
-        click.echo(f"❌ Failed to update client: {e}")
+        click.echo(f"[ERROR] Failed to update client: {e}")
         sys.exit(1)
 
 
-def _create_from_template(ctx: PfSenseContext, template: str, name: str, template_vars: dict):
+def _create_from_template(ctx, template: str, name: str, template_vars: dict):
     """Create client configuration from template."""
     # Clean up None values
     clean_vars = {k: v for k, v in template_vars.items() if v is not None}
     
     client_config = ctx.config_manager.create_from_template(template, name, clean_vars)
-    click.echo(f"✅ Created client '{name}' from template '{template}'")
+    click.echo(f"[OK] Created client '{name}' from template '{template}'")
 
 
-def _create_manual_config(ctx: PfSenseContext, name: str, network: str, vlan: Optional[int], 
+def _create_manual_config(ctx, name: str, network: str, vlan: Optional[int], 
                          client_type: str, gateway: Optional[str], dns: List[str], 
                          domain: Optional[str], dhcp: bool, dhcp_start: Optional[str], 
                          dhcp_end: Optional[str], vpn: bool, vpn_port: Optional[int]):
@@ -446,11 +453,11 @@ def _create_manual_config(ctx: PfSenseContext, name: str, network: str, vlan: Op
     # Validate configuration
     errors = ctx.config_manager.validate_config(client_config.dict())
     if errors:
-        click.echo("❌ Configuration validation failed:")
+        click.echo("[ERROR] Configuration validation failed:")
         for error in errors:
             click.echo(f"  - {error}")
         sys.exit(1)
     
     # Save configuration
     ctx.config_manager.save_client_config(client_config)
-    click.echo(f"✅ Created client configuration '{name}'")
+    click.echo(f"[OK] Created client configuration '{name}'")

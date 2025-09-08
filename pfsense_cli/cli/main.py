@@ -14,10 +14,7 @@ from ..api.client import PfSenseAPIClient
 from ..api.endpoints import PfSenseEndpoints
 from ..api.exceptions import PfSenseAPIError
 
-# Import command groups
-from .client import client_group
-from .network import network_group  
-from .vpn import vpn_group
+# We'll import command groups after defining the context to avoid circular imports
 
 logger = get_logger(__name__)
 
@@ -32,7 +29,7 @@ class PfSenseContext:
         self.verbose = False
 
 
-pass_context = click.make_pass_decorator(PfSenseContext, ensure=True)
+pass_context = click.pass_obj
 
 
 @click.group()
@@ -41,8 +38,8 @@ pass_context = click.make_pass_decorator(PfSenseContext, ensure=True)
 @click.option('--quiet', '-q', is_flag=True, help='Suppress output except errors')
 @click.option('--log-file', type=click.Path(), help='Log to file')
 @click.version_option(version='1.0.0', prog_name='pfsense-cli')
-@pass_context
-def cli(ctx: PfSenseContext, config_dir: Optional[str], verbose: bool, quiet: bool, log_file: Optional[str]):
+@click.pass_context
+def cli(ctx: click.Context, config_dir: Optional[str], verbose: bool, quiet: bool, log_file: Optional[str]):
     """
     pfSense Configuration Management CLI Tool
     
@@ -65,11 +62,13 @@ def cli(ctx: PfSenseContext, config_dir: Optional[str], verbose: bool, quiet: bo
     )
     
     # Initialize context
-    ctx.verbose = verbose
+    pfsense_ctx = PfSenseContext()
+    pfsense_ctx.verbose = verbose
+    ctx.obj = pfsense_ctx
     
     try:
         # Initialize configuration manager
-        ctx.config_manager = ConfigManager(config_dir)
+        pfsense_ctx.config_manager = ConfigManager(config_dir)
         logger.info("pfSense CLI initialized successfully")
         
     except Exception as e:
@@ -79,7 +78,7 @@ def cli(ctx: PfSenseContext, config_dir: Optional[str], verbose: bool, quiet: bo
 
 @cli.command()
 @pass_context
-def setup(ctx: PfSenseContext):
+def setup(ctx):
     """Initial setup and configuration wizard."""
     click.echo("pfSense CLI Setup Wizard")
     click.echo("=" * 25)
@@ -103,7 +102,7 @@ def setup(ctx: PfSenseContext):
     
     ctx.config_manager.save_settings(settings)
     
-    click.echo("\n✅ Configuration saved successfully!")
+    click.echo("\n[OK] Configuration saved successfully!")
     click.echo(f"Config directory: {ctx.config_manager.config_dir}")
     
     # Test connection
@@ -123,21 +122,22 @@ def setup(ctx: PfSenseContext):
             health = asyncio.run(test_connection())
             
             if health['connected']:
-                click.echo("✅ Connection test successful!")
+                click.echo("[OK] Connection test successful!")
             else:
-                click.echo(f"❌ Connection test failed: {health.get('error')}")
+                click.echo(f"[ERROR] Connection test failed: {health.get('error')}")
                 
         except Exception as e:
-            click.echo(f"❌ Connection test failed: {e}")
+            click.echo(f"[ERROR] Connection test failed: {e}")
 
 
 @cli.command()
 @pass_context
-def status(ctx: PfSenseContext):
+def status(ctx):
     """Show pfSense connection status and system information."""
     try:
         # Initialize API client
-        ctx.api_client = _get_api_client(ctx)
+        from .utils import get_api_client
+        ctx.api_client = get_api_client(ctx)
         
         async def get_status():
             health = await ctx.api_client.health_check()
@@ -152,8 +152,8 @@ def status(ctx: PfSenseContext):
         click.echo("=" * 25)
         
         if health['connected']:
-            click.echo(f"Status: ✅ Connected")
-            click.echo(f"Authenticated: {'✅ Yes' if health['authenticated'] else '❌ No'}")
+            click.echo(f"Status: [OK] Connected")
+            click.echo(f"Authenticated: {'[OK] Yes' if health['authenticated'] else '[ERROR] No'}")
             click.echo(f"API Version: {health.get('api_version', 'Unknown')}")
             
             if system_info:
@@ -161,18 +161,18 @@ def status(ctx: PfSenseContext):
                 click.echo(f"System Version: {data.get('version', 'Unknown')}")
                 click.echo(f"System Time: {data.get('datetime', 'Unknown')}")
         else:
-            click.echo(f"Status: ❌ Disconnected")
+            click.echo(f"Status: [ERROR] Disconnected")
             click.echo(f"Error: {health.get('error', 'Unknown error')}")
             
     except Exception as e:
-        click.echo(f"❌ Failed to get status: {e}")
+        click.echo(f"[ERROR] Failed to get status: {e}")
         sys.exit(1)
 
 
 @cli.command()
 @click.option('--format', type=click.Choice(['table', 'json', 'yaml']), default='table')
 @pass_context
-def config(ctx: PfSenseContext, format: str):
+def config(ctx, format: str):
     """Show current configuration settings."""
     settings = ctx.config_manager.settings
     
@@ -204,7 +204,7 @@ def config(ctx: PfSenseContext, format: str):
 @click.argument('key')
 @click.argument('value')
 @pass_context
-def set_config(ctx: PfSenseContext, key: str, value: str):
+def set_config(ctx, key: str, value: str):
     """Set configuration value using dot notation (e.g., pfsense.base_url)."""
     try:
         # Try to parse as JSON for complex values
@@ -215,51 +215,22 @@ def set_config(ctx: PfSenseContext, key: str, value: str):
             parsed_value = value
         
         ctx.config_manager.set_setting(key, parsed_value)
-        click.echo(f"✅ Set {key} = {parsed_value}")
+        click.echo(f"[OK] Set {key} = {parsed_value}")
         
     except Exception as e:
-        click.echo(f"❌ Failed to set configuration: {e}")
+        click.echo(f"[ERROR] Failed to set configuration: {e}")
         sys.exit(1)
 
 
-def _get_api_client(ctx: PfSenseContext) -> PfSenseAPIClient:
-    """Get configured API client."""
-    if ctx.api_client:
-        return ctx.api_client
-    
-    # Get connection settings
-    base_url = ctx.config_manager.get_setting('pfsense.base_url')
-    username = ctx.config_manager.get_setting('pfsense.username')
-    password = ctx.config_manager.get_setting('pfsense.password')
-    verify_ssl = ctx.config_manager.get_setting('pfsense.verify_ssl', False)
-    timeout = ctx.config_manager.get_setting('pfsense.timeout', 30)
-    
-    if not all([base_url, username, password]):
-        click.echo("❌ pfSense connection not configured. Run 'pfsense-cli setup' first.")
-        sys.exit(1)
-    
-    ctx.api_client = PfSenseAPIClient(
-        base_url=base_url,
-        username=username,
-        password=password,
-        verify_ssl=verify_ssl,
-        timeout=timeout
-    )
-    
-    return ctx.api_client
 
 
-def _get_endpoints(ctx: PfSenseContext) -> PfSenseEndpoints:
-    """Get API endpoints wrapper."""
-    if ctx.endpoints:
-        return ctx.endpoints
-    
-    api_client = _get_api_client(ctx)
-    ctx.endpoints = PfSenseEndpoints(api_client)
-    return ctx.endpoints
+# Import and add command groups after avoiding circular imports
+from .client import client_group
+from .network import network_group  
+from .vpn import vpn_group
 
+# Import command groups - circular import resolved
 
-# Add command groups
 cli.add_command(client_group)
 cli.add_command(network_group)
 cli.add_command(vpn_group)
@@ -273,11 +244,11 @@ def main():
         click.echo("\n\nOperation cancelled by user.")
         sys.exit(130)
     except PfSenseAPIError as e:
-        click.echo(f"❌ API Error: {e}")
+        click.echo(f"[ERROR] API Error: {e}")
         sys.exit(1)
     except Exception as e:
         logger.exception("Unexpected error occurred")
-        click.echo(f"❌ Unexpected error: {e}")
+        click.echo(f"[ERROR] Unexpected error: {e}")
         sys.exit(1)
 
 

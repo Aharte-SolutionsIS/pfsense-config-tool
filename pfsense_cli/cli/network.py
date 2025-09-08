@@ -11,7 +11,14 @@ from tabulate import tabulate
 from ..models.network import NetworkSettings, NetworkInterface, RouteConfig, DHCPPool
 from ..api.exceptions import ClientNotFoundError
 from ..utils.logging import get_logger, LogContext
-from .main import PfSenseContext, pass_context, _get_endpoints
+from .utils import get_endpoints
+
+# Use Click's built-in context passing
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    from .main import PfSenseContext
+
+pass_context = click.pass_obj
 
 logger = get_logger(__name__)
 
@@ -30,7 +37,7 @@ def network_group():
 @click.option('--mtu', type=int, help='MTU size')
 @click.option('--dry-run', is_flag=True, help='Show what would be done without making changes')
 @pass_context
-def configure_network(ctx: PfSenseContext, client: str, gateway: Optional[str], 
+def configure_network(ctx, client: str, gateway: Optional[str], 
                      dns: List[str], domain: Optional[str], mtu: Optional[int], dry_run: bool):
     """
     Configure network settings for a client.
@@ -45,7 +52,7 @@ def configure_network(ctx: PfSenseContext, client: str, gateway: Optional[str],
             try:
                 client_config = ctx.config_manager.load_client_config(client)
             except Exception:
-                click.echo(f"❌ Client '{client}' not found")
+                click.echo(f"[ERROR] Client '{client}' not found")
                 sys.exit(1)
             
             # Update network settings
@@ -70,25 +77,25 @@ def configure_network(ctx: PfSenseContext, client: str, gateway: Optional[str],
             )
             
             if dry_run:
-                click.echo("\n✅ Dry run completed. Use without --dry-run to apply changes.")
+                click.echo("\n[OK] Dry run completed. Use without --dry-run to apply changes.")
                 return
             
             # Save updated client config
             ctx.config_manager.save_client_config(client_config)
             
             # Apply to pfSense
-            endpoints = _get_endpoints(ctx)
+            endpoints = get_endpoints(ctx)
             
             async def configure():
                 return await endpoints.configure_network(client, network_settings)
             
             result = asyncio.run(configure())
             
-            click.echo(f"✅ Network configured for client '{client}'")
+            click.echo(f"[OK] Network configured for client '{client}'")
             
     except Exception as e:
         logger.error(f"Failed to configure network for client '{client}': {e}")
-        click.echo(f"❌ Failed to configure network: {e}")
+        click.echo(f"[ERROR] Failed to configure network: {e}")
         sys.exit(1)
 
 
@@ -97,10 +104,10 @@ def configure_network(ctx: PfSenseContext, client: str, gateway: Optional[str],
 @click.option('--status', type=click.Choice(['up', 'down', 'unknown']), help='Filter by status')
 @click.option('--type', type=click.Choice(['physical', 'vlan', 'bridge', 'vpn']), help='Filter by type')
 @pass_context
-def list_interfaces(ctx: PfSenseContext, format: str, status: Optional[str], type: Optional[str]):
+def list_interfaces(ctx, format: str, status: Optional[str], type: Optional[str]):
     """List network interfaces."""
     try:
-        endpoints = _get_endpoints(ctx)
+        endpoints = get_endpoints(ctx)
         
         async def get_interfaces():
             # This would call the pfSense API to get interfaces
@@ -145,7 +152,7 @@ def list_interfaces(ctx: PfSenseContext, format: str, status: Optional[str], typ
             headers = ['Name', 'Description', 'Status', 'IP Address', 'Type']
             rows = []
             for iface in interfaces:
-                status_icon = '✅' if iface.get('status') == 'up' else '❌'
+                status_icon = '[OK]' if iface.get('status') == 'up' else '[ERROR]'
                 rows.append([
                     iface.get('name', 'N/A'),
                     iface.get('description', 'N/A'),
@@ -159,7 +166,7 @@ def list_interfaces(ctx: PfSenseContext, format: str, status: Optional[str], typ
             
     except Exception as e:
         logger.error(f"Failed to list interfaces: {e}")
-        click.echo(f"❌ Failed to list interfaces: {e}")
+        click.echo(f"[ERROR] Failed to list interfaces: {e}")
         sys.exit(1)
 
 
@@ -171,7 +178,7 @@ def list_interfaces(ctx: PfSenseContext, format: str, status: Optional[str], typ
 @click.option('--description', help='VLAN description (for create)')
 @click.option('--format', type=click.Choice(['table', 'json', 'yaml']), default='table')
 @pass_context
-def manage_vlan(ctx: PfSenseContext, action: str, client: Optional[str], 
+def manage_vlan(ctx, action: str, client: Optional[str], 
                 vlan_id: Optional[int], interface: str, description: Optional[str], format: str):
     """
     Manage VLAN configurations.
@@ -183,7 +190,7 @@ def manage_vlan(ctx: PfSenseContext, action: str, client: Optional[str],
     try:
         if action == 'create':
             if not client or not vlan_id:
-                click.echo("❌ Client name and VLAN ID are required for create action")
+                click.echo("[ERROR] Client name and VLAN ID are required for create action")
                 sys.exit(1)
             
             with LogContext(logger, client_name=client, operation='create_vlan'):
@@ -192,11 +199,11 @@ def manage_vlan(ctx: PfSenseContext, action: str, client: Optional[str],
                 try:
                     client_config = ctx.config_manager.load_client_config(client)
                 except Exception:
-                    click.echo(f"❌ Client '{client}' not found")
+                    click.echo(f"[ERROR] Client '{client}' not found")
                     sys.exit(1)
                 
                 # Update VLAN configuration
-                from ..models.network import VLANConfig
+                from ..models.client import VLANConfig
                 client_config.vlan = VLANConfig(
                     vlan_id=vlan_id,
                     interface=interface,
@@ -206,7 +213,7 @@ def manage_vlan(ctx: PfSenseContext, action: str, client: Optional[str],
                 # Validate configuration
                 errors = ctx.config_manager.validate_config(client_config.dict())
                 if errors:
-                    click.echo("❌ Configuration validation failed:")
+                    click.echo("[ERROR] Configuration validation failed:")
                     for error in errors:
                         click.echo(f"  - {error}")
                     sys.exit(1)
@@ -214,11 +221,11 @@ def manage_vlan(ctx: PfSenseContext, action: str, client: Optional[str],
                 # Save configuration
                 ctx.config_manager.save_client_config(client_config)
                 
-                click.echo(f"✅ VLAN {vlan_id} created for client '{client}'")
+                click.echo(f"[OK] VLAN {vlan_id} created for client '{client}'")
                 
         elif action == 'delete':
             if not client:
-                click.echo("❌ Client name is required for delete action")
+                click.echo("[ERROR] Client name is required for delete action")
                 sys.exit(1)
             
             with LogContext(logger, client_name=client, operation='delete_vlan'):
@@ -231,7 +238,7 @@ def manage_vlan(ctx: PfSenseContext, action: str, client: Optional[str],
                 # Save configuration
                 ctx.config_manager.save_client_config(client_config)
                 
-                click.echo(f"✅ VLAN {old_vlan_id} removed from client '{client}'")
+                click.echo(f"[OK] VLAN {old_vlan_id} removed from client '{client}'")
                 
         elif action == 'list':
             # List all VLANs from client configurations
@@ -280,7 +287,7 @@ def manage_vlan(ctx: PfSenseContext, action: str, client: Optional[str],
                 
     except Exception as e:
         logger.error(f"Failed to manage VLAN: {e}")
-        click.echo(f"❌ Failed to manage VLAN: {e}")
+        click.echo(f"[ERROR] Failed to manage VLAN: {e}")
         sys.exit(1)
 
 
@@ -292,7 +299,7 @@ def manage_vlan(ctx: PfSenseContext, action: str, client: Optional[str],
 @click.option('--lease-time', type=int, help='Lease time in seconds')
 @click.option('--format', type=click.Choice(['table', 'json', 'yaml']), default='table')
 @pass_context
-def manage_dhcp(ctx: PfSenseContext, action: str, client: Optional[str], 
+def manage_dhcp(ctx, action: str, client: Optional[str], 
                 start_ip: Optional[str], end_ip: Optional[str], lease_time: Optional[int], format: str):
     """
     Manage DHCP configurations.
@@ -304,7 +311,7 @@ def manage_dhcp(ctx: PfSenseContext, action: str, client: Optional[str],
     try:
         if action in ['enable', 'disable']:
             if not client:
-                click.echo("❌ Client name is required")
+                click.echo("[ERROR] Client name is required")
                 sys.exit(1)
             
             with LogContext(logger, client_name=client, operation=f'{action}_dhcp'):
@@ -313,18 +320,18 @@ def manage_dhcp(ctx: PfSenseContext, action: str, client: Optional[str],
                 client_config = ctx.config_manager.load_client_config(client)
                 
                 if action == 'enable':
-                    from ..models.network import DHCPConfig
+                    from ..models.client import DHCPConfig
                     client_config.dhcp = DHCPConfig(
                         enabled=True,
                         start_ip=start_ip,
                         end_ip=end_ip,
                         lease_time=lease_time or 7200
                     )
-                    click.echo(f"✅ DHCP enabled for client '{client}'")
+                    click.echo(f"[OK] DHCP enabled for client '{client}'")
                 else:
                     if client_config.dhcp:
                         client_config.dhcp.enabled = False
-                    click.echo(f"✅ DHCP disabled for client '{client}'")
+                    click.echo(f"[OK] DHCP disabled for client '{client}'")
                 
                 # Save configuration
                 ctx.config_manager.save_client_config(client_config)
@@ -367,7 +374,7 @@ def manage_dhcp(ctx: PfSenseContext, action: str, client: Optional[str],
                 headers = ['Client', 'Status', 'Network', 'Range', 'Lease Time']
                 rows = []
                 for dhcp in dhcp_configs:
-                    status_icon = '✅' if dhcp['enabled'] else '❌'
+                    status_icon = '[OK]' if dhcp['enabled'] else '[ERROR]'
                     range_str = f"{dhcp['start_ip']} - {dhcp['end_ip']}" if dhcp['start_ip'] and dhcp['end_ip'] else 'N/A'
                     
                     rows.append([
@@ -383,7 +390,7 @@ def manage_dhcp(ctx: PfSenseContext, action: str, client: Optional[str],
                 
     except Exception as e:
         logger.error(f"Failed to manage DHCP: {e}")
-        click.echo(f"❌ Failed to manage DHCP: {e}")
+        click.echo(f"[ERROR] Failed to manage DHCP: {e}")
         sys.exit(1)
 
 
@@ -397,7 +404,7 @@ def manage_dhcp(ctx: PfSenseContext, action: str, client: Optional[str],
 @click.option('--description', help='NAT rule description')
 @click.option('--format', type=click.Choice(['table', 'json', 'yaml']), default='table')
 @pass_context
-def manage_nat(ctx: PfSenseContext, action: str, client: Optional[str], 
+def manage_nat(ctx, action: str, client: Optional[str], 
                external_port: Optional[int], internal_ip: Optional[str], 
                internal_port: Optional[int], protocol: str, description: Optional[str], format: str):
     """
@@ -410,7 +417,7 @@ def manage_nat(ctx: PfSenseContext, action: str, client: Optional[str],
     try:
         if action == 'add':
             if not all([client, external_port, internal_ip, internal_port]):
-                click.echo("❌ Client, external-port, internal-ip, and internal-port are required")
+                click.echo("[ERROR] Client, external-port, internal-ip, and internal-port are required")
                 sys.exit(1)
             
             with LogContext(logger, client_name=client, operation='add_nat_rule'):
@@ -435,11 +442,11 @@ def manage_nat(ctx: PfSenseContext, action: str, client: Optional[str],
                 # Save configuration
                 ctx.config_manager.save_client_config(client_config)
                 
-                click.echo(f"✅ NAT rule added for client '{client}': {external_port} -> {internal_ip}:{internal_port}")
+                click.echo(f"[OK] NAT rule added for client '{client}': {external_port} -> {internal_ip}:{internal_port}")
                 
         elif action == 'remove':
             if not client:
-                click.echo("❌ Client name is required")
+                click.echo("[ERROR] Client name is required")
                 sys.exit(1)
             
             with LogContext(logger, client_name=client, operation='remove_nat_rule'):
@@ -461,13 +468,13 @@ def manage_nat(ctx: PfSenseContext, action: str, client: Optional[str],
                 removed_count = original_count - len(client_config.nat_rules)
                 
                 if removed_count == 0:
-                    click.echo(f"❌ No NAT rules found to remove for client '{client}'")
+                    click.echo(f"[ERROR] No NAT rules found to remove for client '{client}'")
                     return
                 
                 # Save configuration
                 ctx.config_manager.save_client_config(client_config)
                 
-                click.echo(f"✅ Removed {removed_count} NAT rule(s) for client '{client}'")
+                click.echo(f"[OK] Removed {removed_count} NAT rule(s) for client '{client}'")
                 
         elif action == 'list':
             # List NAT rules for all clients or specific client
@@ -523,7 +530,7 @@ def manage_nat(ctx: PfSenseContext, action: str, client: Optional[str],
                 
     except Exception as e:
         logger.error(f"Failed to manage NAT: {e}")
-        click.echo(f"❌ Failed to manage NAT: {e}")
+        click.echo(f"[ERROR] Failed to manage NAT: {e}")
         sys.exit(1)
 
 
@@ -538,7 +545,7 @@ def manage_nat(ctx: PfSenseContext, action: str, client: Optional[str],
 @click.option('--description', help='Rule description')
 @click.option('--format', type=click.Choice(['table', 'json', 'yaml']), default='table')
 @pass_context
-def manage_firewall(ctx: PfSenseContext, action: str, client: Optional[str], 
+def manage_firewall(ctx, action: str, client: Optional[str], 
                    rule_action: str, protocol: str, source: str, destination: str,
                    port: Optional[str], description: Optional[str], format: str):
     """
@@ -551,7 +558,7 @@ def manage_firewall(ctx: PfSenseContext, action: str, client: Optional[str],
     try:
         if action == 'add':
             if not client:
-                click.echo("❌ Client name is required")
+                click.echo("[ERROR] Client name is required")
                 sys.exit(1)
             
             with LogContext(logger, client_name=client, operation='add_firewall_rule'):
@@ -576,11 +583,11 @@ def manage_firewall(ctx: PfSenseContext, action: str, client: Optional[str],
                 # Save configuration
                 ctx.config_manager.save_client_config(client_config)
                 
-                click.echo(f"✅ Firewall rule added for client '{client}': {rule_action} {protocol} {source} -> {destination}")
+                click.echo(f"[OK] Firewall rule added for client '{client}': {rule_action} {protocol} {source} -> {destination}")
                 
         elif action == 'remove':
             if not client:
-                click.echo("❌ Client name is required")
+                click.echo("[ERROR] Client name is required")
                 sys.exit(1)
             
             with LogContext(logger, client_name=client, operation='remove_firewall_rule'):
@@ -595,7 +602,7 @@ def manage_firewall(ctx: PfSenseContext, action: str, client: Optional[str],
                 # Save configuration
                 ctx.config_manager.save_client_config(client_config)
                 
-                click.echo(f"✅ Removed {original_count} firewall rule(s) for client '{client}'")
+                click.echo(f"[OK] Removed {original_count} firewall rule(s) for client '{client}'")
                 
         elif action == 'list':
             # List firewall rules for all clients or specific client
@@ -636,7 +643,7 @@ def manage_firewall(ctx: PfSenseContext, action: str, client: Optional[str],
                 headers = ['Client', 'Action', 'Protocol', 'Source', 'Destination', 'Port', 'Description']
                 rows = []
                 for rule in firewall_rules:
-                    action_icon = '✅' if rule['action'] == 'pass' else '❌'
+                    action_icon = '[OK]' if rule['action'] == 'pass' else '[ERROR]'
                     rows.append([
                         rule['client'],
                         f"{action_icon} {rule['action'].title()}",
@@ -652,5 +659,5 @@ def manage_firewall(ctx: PfSenseContext, action: str, client: Optional[str],
                 
     except Exception as e:
         logger.error(f"Failed to manage firewall: {e}")
-        click.echo(f"❌ Failed to manage firewall: {e}")
+        click.echo(f"[ERROR] Failed to manage firewall: {e}")
         sys.exit(1)

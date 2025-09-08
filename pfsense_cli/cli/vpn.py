@@ -12,7 +12,14 @@ from tabulate import tabulate
 from ..models.vpn import OpenVPNServerConfig, VPNClient, CertificateConfig
 from ..api.exceptions import VPNConfigError, CertificateError
 from ..utils.logging import get_logger, LogContext
-from .main import PfSenseContext, pass_context, _get_endpoints
+from .utils import get_endpoints
+
+# Use Click's built-in context passing
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    from .main import PfSenseContext
+
+pass_context = click.pass_obj
 
 logger = get_logger(__name__)
 
@@ -34,7 +41,7 @@ def vpn_group():
 @click.option('--client-to-client/--no-client-to-client', default=False, help='Allow client-to-client communication')
 @click.option('--dry-run', is_flag=True, help='Show what would be done without making changes')
 @pass_context
-def setup_vpn(ctx: PfSenseContext, client: str, port: int, protocol: str, 
+def setup_vpn(ctx, client: str, port: int, protocol: str, 
               network: Optional[str], push_routes: List[str], dns: List[str],
               compression: bool, client_to_client: bool, dry_run: bool):
     """
@@ -50,7 +57,7 @@ def setup_vpn(ctx: PfSenseContext, client: str, port: int, protocol: str,
             try:
                 client_config = ctx.config_manager.load_client_config(client)
             except Exception:
-                click.echo(f"❌ Client '{client}' not found")
+                click.echo(f"[ERROR] Client '{client}' not found")
                 sys.exit(1)
             
             # Use client network as default tunnel network
@@ -84,7 +91,7 @@ def setup_vpn(ctx: PfSenseContext, client: str, port: int, protocol: str,
             click.echo(f"  Client-to-Client: {'Enabled' if client_to_client else 'Disabled'}")
             
             if dry_run:
-                click.echo("\n✅ Dry run completed. Use without --dry-run to create VPN server.")
+                click.echo("\n[OK] Dry run completed. Use without --dry-run to create VPN server.")
                 return
             
             # Update client config
@@ -93,20 +100,20 @@ def setup_vpn(ctx: PfSenseContext, client: str, port: int, protocol: str,
             ctx.config_manager.save_client_config(client_config)
             
             # Setup VPN server via API
-            endpoints = _get_endpoints(ctx)
+            endpoints = get_endpoints(ctx)
             
             async def setup_server():
                 return await endpoints.setup_openvpn_server(server_config)
             
             result = asyncio.run(setup_server())
             
-            click.echo(f"✅ OpenVPN server setup completed for client '{client}'")
+            click.echo(f"[OK] OpenVPN server setup completed for client '{client}'")
             click.echo(f"VPN Port: {port}")
             click.echo(f"Tunnel Network: {network}")
             
     except Exception as e:
         logger.error(f"Failed to setup VPN for client '{client}': {e}")
-        click.echo(f"❌ Failed to setup VPN: {e}")
+        click.echo(f"[ERROR] Failed to setup VPN: {e}")
         sys.exit(1)
 
 
@@ -120,7 +127,7 @@ def setup_vpn(ctx: PfSenseContext, client: str, port: int, protocol: str,
 @click.option('--output-dir', type=click.Path(), help='Output directory for client config')
 @click.option('--format', type=click.Choice(['table', 'json', 'yaml']), default='table')
 @pass_context
-def manage_vpn_client(ctx: PfSenseContext, action: str, server: Optional[str], 
+def manage_vpn_client(ctx, action: str, server: Optional[str], 
                      client_name: Optional[str], common_name: Optional[str],
                      email: Optional[str], description: Optional[str], 
                      output_dir: Optional[str], format: str):
@@ -135,7 +142,7 @@ def manage_vpn_client(ctx: PfSenseContext, action: str, server: Optional[str],
     try:
         if action == 'create':
             if not all([server, client_name]):
-                click.echo("❌ Server and client-name are required for create action")
+                click.echo("[ERROR] Server and client-name are required for create action")
                 sys.exit(1)
             
             with LogContext(logger, client_name=client_name, operation='create_vpn_client'):
@@ -150,14 +157,14 @@ def manage_vpn_client(ctx: PfSenseContext, action: str, server: Optional[str],
                 )
                 
                 # Create client via API
-                endpoints = _get_endpoints(ctx)
+                endpoints = get_endpoints(ctx)
                 
                 async def create_client():
                     return await endpoints.create_vpn_client(server, vpn_client)
                 
                 result = asyncio.run(create_client())
                 
-                click.echo(f"✅ VPN client '{client_name}' created successfully")
+                click.echo(f"[OK] VPN client '{client_name}' created successfully")
                 click.echo(f"Certificate: {vpn_client.certificate_name}")
                 
                 # Save client configuration locally
@@ -173,7 +180,7 @@ def manage_vpn_client(ctx: PfSenseContext, action: str, server: Optional[str],
                 
         elif action == 'revoke':
             if not client_name:
-                click.echo("❌ Client name is required for revoke action")
+                click.echo("[ERROR] Client name is required for revoke action")
                 sys.exit(1)
             
             with LogContext(logger, client_name=client_name, operation='revoke_vpn_client'):
@@ -195,7 +202,7 @@ def manage_vpn_client(ctx: PfSenseContext, action: str, server: Optional[str],
                     with open(client_file, 'w') as f:
                         yaml.dump(client_data, f, default_flow_style=False)
                 
-                click.echo(f"✅ VPN client '{client_name}' revoked")
+                click.echo(f"[OK] VPN client '{client_name}' revoked")
                 
         elif action == 'list':
             # List VPN clients
@@ -231,9 +238,9 @@ def manage_vpn_client(ctx: PfSenseContext, action: str, server: Optional[str],
                 rows = []
                 for client in clients:
                     status_icon = {
-                        'connected': '✅',
+                        'connected': '[OK]',
                         'disconnected': '⭕',
-                        'revoked': '❌',
+                        'revoked': '[ERROR]',
                         'expired': '⚠️'
                     }.get(client.get('status', 'disconnected'), '❓')
                     
@@ -250,7 +257,7 @@ def manage_vpn_client(ctx: PfSenseContext, action: str, server: Optional[str],
                 
         elif action == 'export':
             if not client_name:
-                click.echo("❌ Client name is required for export action")
+                click.echo("[ERROR] Client name is required for export action")
                 sys.exit(1)
             
             with LogContext(logger, client_name=client_name, operation='export_vpn_client'):
@@ -260,7 +267,7 @@ def manage_vpn_client(ctx: PfSenseContext, action: str, server: Optional[str],
                 client_file = vpn_clients_dir / f'{client_name}.yaml'
                 
                 if not client_file.exists():
-                    click.echo(f"❌ VPN client '{client_name}' not found")
+                    click.echo(f"[ERROR] VPN client '{client_name}' not found")
                     sys.exit(1)
                 
                 # Set output directory
@@ -294,7 +301,7 @@ compress lz4-v2
                 with open(config_file, 'w') as f:
                     f.write(config_content)
                 
-                click.echo(f"✅ VPN client configuration exported:")
+                click.echo(f"[OK] VPN client configuration exported:")
                 click.echo(f"   Config file: {config_file}")
                 click.echo(f"\n📋 Next steps:")
                 click.echo(f"   1. Copy the following files from pfSense:")
@@ -306,7 +313,7 @@ compress lz4-v2
                 
     except Exception as e:
         logger.error(f"Failed to manage VPN client: {e}")
-        click.echo(f"❌ Failed to manage VPN client: {e}")
+        click.echo(f"[ERROR] Failed to manage VPN client: {e}")
         sys.exit(1)
 
 
@@ -314,10 +321,10 @@ compress lz4-v2
 @click.option('--server', help='Specific VPN server name')
 @click.option('--format', type=click.Choice(['table', 'json', 'yaml']), default='table')
 @pass_context
-def vpn_status(ctx: PfSenseContext, server: Optional[str], format: str):
+def vpn_status(ctx, server: Optional[str], format: str):
     """Show VPN server status and connected clients."""
     try:
-        endpoints = _get_endpoints(ctx)
+        endpoints = get_endpoints(ctx)
         
         async def get_status():
             return await endpoints.get_vpn_status()
@@ -342,7 +349,7 @@ def vpn_status(ctx: PfSenseContext, server: Optional[str], format: str):
             
             for srv in servers:
                 click.echo(f"\nServer: {srv.get('name', 'Unknown')}")
-                click.echo(f"Status: {'✅ Running' if srv.get('status') == 'up' else '❌ Stopped'}")
+                click.echo(f"Status: {'[OK] Running' if srv.get('status') == 'up' else '[ERROR] Stopped'}")
                 click.echo(f"Port: {srv.get('port', 'N/A')}")
                 click.echo(f"Protocol: {srv.get('protocol', 'N/A')}")
                 click.echo(f"Connected Clients: {srv.get('connected_clients', 0)}")
@@ -367,7 +374,7 @@ def vpn_status(ctx: PfSenseContext, server: Optional[str], format: str):
                     
     except Exception as e:
         logger.error(f"Failed to get VPN status: {e}")
-        click.echo(f"❌ Failed to get VPN status: {e}")
+        click.echo(f"[ERROR] Failed to get VPN status: {e}")
         sys.exit(1)
 
 
@@ -376,7 +383,7 @@ def vpn_status(ctx: PfSenseContext, server: Optional[str], format: str):
 @click.option('--lines', type=int, default=50, help='Number of log lines to show')
 @click.option('--follow', is_flag=True, help='Follow log output (like tail -f)')
 @pass_context
-def vpn_logs(ctx: PfSenseContext, server: Optional[str], lines: int, follow: bool):
+def vpn_logs(ctx, server: Optional[str], lines: int, follow: bool):
     """Show VPN server logs."""
     try:
         click.echo("VPN Server Logs")
@@ -410,7 +417,7 @@ def vpn_logs(ctx: PfSenseContext, server: Optional[str], lines: int, follow: boo
         click.echo("\nLog following stopped.")
     except Exception as e:
         logger.error(f"Failed to get VPN logs: {e}")
-        click.echo(f"❌ Failed to get VPN logs: {e}")
+        click.echo(f"[ERROR] Failed to get VPN logs: {e}")
         sys.exit(1)
 
 
@@ -427,7 +434,7 @@ def vpn_logs(ctx: PfSenseContext, server: Optional[str], lines: int, follow: boo
 @click.option('--lifetime', type=int, default=3650, help='Certificate lifetime in days')
 @click.option('--format', type=click.Choice(['table', 'json', 'yaml']), default='table')
 @pass_context
-def manage_certificates(ctx: PfSenseContext, action: str, name: Optional[str],
+def manage_certificates(ctx, action: str, name: Optional[str],
                        common_name: Optional[str], country: str, state: Optional[str],
                        city: Optional[str], organization: Optional[str], email: Optional[str],
                        key_length: str, lifetime: int, format: str):
@@ -441,7 +448,7 @@ def manage_certificates(ctx: PfSenseContext, action: str, name: Optional[str],
     try:
         if action in ['create-ca', 'create-server']:
             if not all([name, common_name]):
-                click.echo("❌ Name and common-name are required")
+                click.echo("[ERROR] Name and common-name are required")
                 sys.exit(1)
             
             cert_type = 'Certificate Authority' if action == 'create-ca' else 'Server Certificate'
@@ -479,7 +486,7 @@ def manage_certificates(ctx: PfSenseContext, action: str, name: Optional[str],
                 with open(cert_file, 'w') as f:
                     yaml.dump(cert_data, f, default_flow_style=False)
                 
-                click.echo(f"✅ {cert_type} configuration saved: {cert_file}")
+                click.echo(f"[OK] {cert_type} configuration saved: {cert_file}")
                 click.echo("📋 Next: Apply this certificate in pfSense certificate manager")
                 
         elif action == 'list':
@@ -530,7 +537,7 @@ def manage_certificates(ctx: PfSenseContext, action: str, name: Optional[str],
                 
         elif action == 'revoke':
             if not name:
-                click.echo("❌ Certificate name is required for revoke action")
+                click.echo("[ERROR] Certificate name is required for revoke action")
                 sys.exit(1)
             
             with LogContext(logger, operation='revoke_certificate'):
@@ -554,9 +561,9 @@ def manage_certificates(ctx: PfSenseContext, action: str, name: Optional[str],
                     with open(cert_file, 'w') as f:
                         yaml.dump(cert_data, f, default_flow_style=False)
                 
-                click.echo(f"✅ Certificate '{name}' marked as revoked")
+                click.echo(f"[OK] Certificate '{name}' marked as revoked")
                 
     except Exception as e:
         logger.error(f"Failed to manage certificates: {e}")
-        click.echo(f"❌ Failed to manage certificates: {e}")
+        click.echo(f"[ERROR] Failed to manage certificates: {e}")
         sys.exit(1)
