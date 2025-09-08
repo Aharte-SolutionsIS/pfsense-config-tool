@@ -1,4 +1,4 @@
-Metadata-Version: 2.4
+Metadata-Version: 2.1
 Name: pfsense-cli
 Version: 1.0.0
 Summary: Professional pfSense automation and configuration management CLI tool
@@ -45,9 +45,6 @@ Requires-Dist: mypy>=1.0.0; extra == "dev"
 Provides-Extra: docs
 Requires-Dist: mkdocs>=1.4.0; extra == "docs"
 Requires-Dist: mkdocs-material>=9.0.0; extra == "docs"
-Dynamic: author
-Dynamic: home-page
-Dynamic: requires-python
 
 # pfSense Configuration Management CLI Tool
 
