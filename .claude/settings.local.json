@@ -7,7 +7,9 @@
       "Bash(pip install:*)",
       "Bash(cd:*)",
       "Bash(pfsense-cli:*)",
-      "WebFetch(domain:pfrest.org)"
+      "WebFetch(domain:pfrest.org)",
+      "WebSearch",
+      "WebFetch(domain:github.com)"
     ],
     "deny": [],
     "ask": []

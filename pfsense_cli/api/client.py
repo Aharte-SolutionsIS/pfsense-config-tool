@@ -393,10 +393,11 @@ class PfSenseAPIClient:
     # Health check methods
     async def health_check(self) -> Dict[str, Any]:
         """Check API health and connectivity."""
-        # Try different status endpoints for v2.6.0 API
+        # Try different status endpoints based on documentation research
         status_endpoints = [
-            '/system/status',      # Common system status endpoint
-            '/status/system',      # Alternative format
+            '/status/system',      # v2 API: /api/v2/status/system (most likely)
+            '/api/v1/status/system',  # v1 API: confirmed working (full path)
+            '/system/status',      # Alternative v2 pattern
             '/system/info',        # System information
             '/system',             # Simple system endpoint
             '/status',             # Original attempt
@@ -429,8 +430,9 @@ class PfSenseAPIClient:
         """Get system information."""
         # Use the same endpoint discovery as health_check
         status_endpoints = [
-            '/system/status',      # Common system status endpoint
-            '/status/system',      # Alternative format
+            '/status/system',      # v2 API: /api/v2/status/system (most likely)
+            '/api/v1/status/system',  # v1 API: confirmed working (full path)
+            '/system/status',      # Alternative v2 pattern
             '/system/info',        # System information
             '/system',             # Simple system endpoint
             '/status',             # Original attempt
