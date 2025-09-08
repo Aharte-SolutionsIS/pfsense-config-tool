@@ -121,45 +121,56 @@ class PfSenseAPIClient:
         try:
             # Try different API versions and endpoints
             auth_endpoints = [
-                '/api/v2/auth',
-                '/api/v1/access_token',
-                '/api/auth'
+                '/api/v2/auth/jwt',  # pfSense REST API v2.6.0
+                '/api/v2/auth/key',  # Alternative API key auth
+                '/api/v1/access_token',  # Legacy v1
             ]
             
-            auth_data = {
-                'client-id': self.username,
-                'client-token': self.password
-            }
+            # Try different authentication data formats
+            auth_formats = [
+                {'client-id': self.username, 'client-token': self.password},  # v1 format
+                {'username': self.username, 'password': self.password},       # JWT format
+                {'client_id': self.username, 'client_token': self.password}   # Alternative format
+            ]
             
             response = None
             successful_endpoint = None
             
-            # Try different endpoint formats
+            # Try different endpoint and data format combinations
             for endpoint in auth_endpoints:
                 auth_url = urljoin(self.base_url, endpoint)
                 logger.debug(f"Trying authentication endpoint: {endpoint}")
                 
-                try:
-                    response = self.session.post(
-                        auth_url,
-                        json=auth_data,
-                        timeout=self.timeout
-                    )
-                    
-                    if response.status_code == 200:
-                        successful_endpoint = endpoint
-                        break
-                    elif response.status_code == 404:
-                        logger.debug(f"Endpoint {endpoint} not found, trying next...")
-                        continue
-                    else:
-                        # Other error codes - handle them
-                        successful_endpoint = endpoint
-                        break
+                for auth_data in auth_formats:
+                    try:
+                        logger.debug(f"Trying auth data format: {list(auth_data.keys())}")
+                        response = self.session.post(
+                            auth_url,
+                            json=auth_data,
+                            timeout=self.timeout
+                        )
                         
-                except requests.exceptions.RequestException as e:
-                    logger.debug(f"Request failed for {endpoint}: {e}")
-                    continue
+                        if response.status_code == 200:
+                            successful_endpoint = endpoint
+                            break
+                        elif response.status_code == 404:
+                            logger.debug(f"Auth format failed with 404, trying next format...")
+                            continue
+                        elif response.status_code == 401:
+                            logger.debug(f"Auth format failed with 401, trying next format...")
+                            continue
+                        else:
+                            # Other error codes - may still be valid endpoint
+                            successful_endpoint = endpoint
+                            break
+                            
+                    except requests.exceptions.RequestException as e:
+                        logger.debug(f"Request failed for {endpoint} with {list(auth_data.keys())}: {e}")
+                        continue
+                
+                # If we got a successful response, break out of endpoint loop
+                if response and response.status_code == 200:
+                    break
                     
             if response is None:
                 raise AuthenticationError("No valid API authentication endpoint found. Check if REST API is properly installed.")
