@@ -119,26 +119,63 @@ class PfSenseAPIClient:
             True if authentication successful, False otherwise
         """
         try:
-            auth_url = urljoin(self.base_url, '/api/v1/access_token')
+            # Try different API versions and endpoints
+            auth_endpoints = [
+                '/api/v2/auth',
+                '/api/v1/access_token',
+                '/api/auth'
+            ]
             
             auth_data = {
                 'client-id': self.username,
                 'client-token': self.password
             }
             
-            logger.debug("Attempting authentication with pfSense API")
+            response = None
+            successful_endpoint = None
             
-            response = self.session.post(
-                auth_url,
-                json=auth_data,
-                timeout=self.timeout
-            )
+            # Try different endpoint formats
+            for endpoint in auth_endpoints:
+                auth_url = urljoin(self.base_url, endpoint)
+                logger.debug(f"Trying authentication endpoint: {endpoint}")
+                
+                try:
+                    response = self.session.post(
+                        auth_url,
+                        json=auth_data,
+                        timeout=self.timeout
+                    )
+                    
+                    if response.status_code == 200:
+                        successful_endpoint = endpoint
+                        break
+                    elif response.status_code == 404:
+                        logger.debug(f"Endpoint {endpoint} not found, trying next...")
+                        continue
+                    else:
+                        # Other error codes - handle them
+                        successful_endpoint = endpoint
+                        break
+                        
+                except requests.exceptions.RequestException as e:
+                    logger.debug(f"Request failed for {endpoint}: {e}")
+                    continue
+                    
+            if response is None:
+                raise AuthenticationError("No valid API authentication endpoint found. Check if REST API is properly installed.")
+            
+            logger.debug(f"Using authentication endpoint: {successful_endpoint}")
             
             if response.status_code == 200:
                 token_data = response.json()
-                self._auth_token = token_data.get('data', {}).get('token')
                 
-                if self._auth_token:
+                # Try different token response formats
+                token = (token_data.get('data', {}).get('token') or 
+                        token_data.get('token') or 
+                        token_data.get('access_token'))
+                
+                if token:
+                    self._auth_token = token
                     # Set auth header for future requests
                     self.session.headers.update({
                         'Authorization': f'Bearer {self._auth_token}',
