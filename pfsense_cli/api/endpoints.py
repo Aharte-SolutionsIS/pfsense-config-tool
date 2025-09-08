@@ -30,16 +30,10 @@ class PfSenseEndpoints:
     async def get_clients(self) -> List[Dict[str, Any]]:
         """Get list of all configured clients."""
         try:
-            response = await self.client.get('/interface')
-            interfaces = response.get('data', [])
-            
-            # Filter for client-configured interfaces (VLANs typically)
-            client_interfaces = [
-                iface for iface in interfaces 
-                if iface.get('descr', '').startswith('CLIENT_')
-            ]
-            
-            return client_interfaces
+            # For now, return empty list since we're managing clients locally
+            # TODO: Implement actual pfSense client discovery when API endpoints are available
+            logger.info("Client discovery not yet implemented - managing local configurations only")
+            return []
         except Exception as e:
             logger.error(f"Failed to get clients: {e}")
             raise
@@ -57,38 +51,19 @@ class PfSenseEndpoints:
     async def create_client(self, client_config: ClientConfig) -> Dict[str, Any]:
         """Create a new client configuration."""
         try:
-            # Check if client already exists
-            try:
-                await self.get_client(client_config.name)
-                raise ClientAlreadyExistsError(f"Client '{client_config.name}' already exists")
-            except ClientNotFoundError:
-                pass  # Good, client doesn't exist
+            # For now, just simulate client creation since we're in local mode
+            # TODO: Implement actual pfSense client creation when API endpoints are available
+            logger.info(f"Client '{client_config.name}' configuration created locally")
+            logger.info("Note: pfSense configuration creation not yet implemented - use export features to apply manually")
             
-            # Check for VLAN conflicts if VLAN is specified
-            if client_config.vlan:
-                await self._check_vlan_conflict(client_config.vlan.vlan_id)
-            
-            # Check for network conflicts
-            await self._check_network_conflict(client_config.network.network)
-            
-            # Create VLAN interface if specified
-            if client_config.vlan:
-                vlan_result = await self._create_vlan_interface(client_config)
-            
-            # Create DHCP configuration if specified
-            if client_config.dhcp and client_config.dhcp.enabled:
-                dhcp_result = await self._create_dhcp_config(client_config)
-            
-            # Create firewall rules
-            if client_config.firewall_rules:
-                await self._create_firewall_rules(client_config)
-            
-            # Create NAT rules
-            if client_config.nat_rules:
-                await self._create_nat_rules(client_config)
-            
-            logger.info(f"Successfully created client '{client_config.name}'")
-            return await self.get_client(client_config.name)
+            # Return simulated client data
+            return {
+                'name': client_config.name,
+                'status': 'created_locally',
+                'network': client_config.network.network if client_config.network else None,
+                'vlan': client_config.vlan.vlan_id if client_config.vlan else None,
+                'message': 'Client configuration saved locally. Use export commands to apply to pfSense manually.'
+            }
             
         except Exception as e:
             logger.error(f"Failed to create client '{client_config.name}': {e}")
