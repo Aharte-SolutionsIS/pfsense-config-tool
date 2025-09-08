@@ -128,13 +128,13 @@ class PfSenseAPIClient:
                 '/api/auth',         # Simple auth endpoint
             ]
             
-            # Try different authentication data formats
+            # Try different authentication data formats (Basic Auth first since it works)
             auth_formats = [
-                {'client-id': self.username, 'client-token': self.password},  # v1 format
+                None,  # For Basic Auth (no JSON body) - try this first!
                 {'username': self.username, 'password': self.password},       # JWT format
+                {'client-id': self.username, 'client-token': self.password},  # v1 format
                 {'client_id': self.username, 'client_token': self.password},  # Alternative format
                 {'user': self.username, 'pass': self.password},               # Simple format
-                None  # For Basic Auth (no JSON body)
             ]
             
             response = None
