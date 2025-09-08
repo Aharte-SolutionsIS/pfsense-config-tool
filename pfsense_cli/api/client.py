@@ -393,22 +393,54 @@ class PfSenseAPIClient:
     # Health check methods
     async def health_check(self) -> Dict[str, Any]:
         """Check API health and connectivity."""
-        try:
-            result = await self.get('/status')
-            return {
-                'status': 'healthy',
-                'connected': True,
-                'authenticated': bool(self._auth_token),
-                'api_version': result.get('data', {}).get('version', 'unknown')
-            }
-        except Exception as e:
-            return {
-                'status': 'unhealthy',
-                'connected': False,
-                'authenticated': False,
-                'error': str(e)
-            }
+        # Try different status endpoints for v2.6.0 API
+        status_endpoints = [
+            '/system/status',      # Common system status endpoint
+            '/status/system',      # Alternative format
+            '/system/info',        # System information
+            '/system',             # Simple system endpoint
+            '/status',             # Original attempt
+        ]
+        
+        for endpoint in status_endpoints:
+            try:
+                logger.debug(f"Trying status endpoint: {endpoint}")
+                result = await self.get(endpoint)
+                logger.info(f"Successfully connected to status endpoint: {endpoint}")
+                return {
+                    'status': 'healthy',
+                    'connected': True,
+                    'authenticated': bool(self._auth_token),
+                    'api_version': result.get('data', {}).get('version', 'unknown'),
+                    'endpoint_used': endpoint
+                }
+            except Exception as e:
+                logger.debug(f"Status endpoint {endpoint} failed: {e}")
+                continue
+        
+        return {
+            'status': 'unhealthy', 
+            'connected': False,
+            'authenticated': bool(self._auth_token),
+            'error': 'No valid status endpoint found'
+        }
     
     async def get_system_info(self) -> Dict[str, Any]:
         """Get system information."""
-        return await self.get('/status')
+        # Use the same endpoint discovery as health_check
+        status_endpoints = [
+            '/system/status',      # Common system status endpoint
+            '/status/system',      # Alternative format
+            '/system/info',        # System information
+            '/system',             # Simple system endpoint
+            '/status',             # Original attempt
+        ]
+        
+        for endpoint in status_endpoints:
+            try:
+                result = await self.get(endpoint)
+                return result
+            except Exception:
+                continue
+        
+        raise PfSenseAPIError("No valid system info endpoint found")
