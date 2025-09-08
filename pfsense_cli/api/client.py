@@ -244,7 +244,7 @@ class PfSenseAPIClient:
             endpoint = f'/{endpoint}'
         
         if not endpoint.startswith('/api/'):
-            endpoint = f'/api/v1{endpoint}'
+            endpoint = f'/api/v2{endpoint}'
         
         return urljoin(self.base_url, endpoint)
     
