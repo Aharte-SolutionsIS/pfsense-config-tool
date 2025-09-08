@@ -121,16 +121,20 @@ class PfSenseAPIClient:
         try:
             # Try different API versions and endpoints
             auth_endpoints = [
-                '/api/v2/auth/jwt',  # pfSense REST API v2.6.0
-                '/api/v2/auth/key',  # Alternative API key auth
+                '/api/v2/auth/jwt',  # pfSense REST API v2.6.0 JWT
+                '/api/v2/auth',      # pfSense REST API v2.6.0 basic auth
+                '/api/v2/auth/key',  # Alternative API key auth  
                 '/api/v1/access_token',  # Legacy v1
+                '/api/auth',         # Simple auth endpoint
             ]
             
             # Try different authentication data formats
             auth_formats = [
                 {'client-id': self.username, 'client-token': self.password},  # v1 format
                 {'username': self.username, 'password': self.password},       # JWT format
-                {'client_id': self.username, 'client_token': self.password}   # Alternative format
+                {'client_id': self.username, 'client_token': self.password},  # Alternative format
+                {'user': self.username, 'pass': self.password},               # Simple format
+                None  # For Basic Auth (no JSON body)
             ]
             
             response = None
@@ -143,14 +147,25 @@ class PfSenseAPIClient:
                 
                 for auth_data in auth_formats:
                     try:
-                        logger.debug(f"Trying auth data format: {list(auth_data.keys())}")
-                        logger.debug(f"Auth data values: {auth_data}")
-                        logger.debug(f"Full URL: {auth_url}")
-                        response = self.session.post(
-                            auth_url,
-                            json=auth_data,
-                            timeout=self.timeout
-                        )
+                        if auth_data is None:
+                            # Try Basic Auth for JWT endpoint
+                            logger.debug(f"Trying Basic Auth with endpoint: {endpoint}")
+                            logger.debug(f"Full URL: {auth_url}")
+                            from requests.auth import HTTPBasicAuth
+                            response = self.session.post(
+                                auth_url,
+                                auth=HTTPBasicAuth(self.username, self.password),
+                                timeout=self.timeout
+                            )
+                        else:
+                            logger.debug(f"Trying auth data format: {list(auth_data.keys())}")
+                            logger.debug(f"Auth data values: {auth_data}")
+                            logger.debug(f"Full URL: {auth_url}")
+                            response = self.session.post(
+                                auth_url,
+                                json=auth_data,
+                                timeout=self.timeout
+                            )
                         
                         if response.status_code == 200:
                             successful_endpoint = endpoint
