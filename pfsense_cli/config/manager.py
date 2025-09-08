@@ -447,6 +447,8 @@ tags:
     
     def _clean_config_dict(self, config_dict: Dict[str, Any]) -> Dict[str, Any]:
         """Remove None values and empty lists from configuration dictionary."""
+        from enum import Enum
+        
         cleaned = {}
         
         for key, value in config_dict.items():
@@ -458,7 +460,22 @@ tags:
                     cleaned[key] = cleaned_nested
             elif isinstance(value, list):
                 if value:  # Only include non-empty lists
-                    cleaned[key] = value
+                    # Clean list items too
+                    cleaned_list = []
+                    for item in value:
+                        if isinstance(item, Enum):
+                            cleaned_list.append(item.value)
+                        elif isinstance(item, dict):
+                            cleaned_nested = self._clean_config_dict(item)
+                            if cleaned_nested:
+                                cleaned_list.append(cleaned_nested)
+                        elif item is not None:
+                            cleaned_list.append(item)
+                    if cleaned_list:
+                        cleaned[key] = cleaned_list
+            elif isinstance(value, Enum):
+                # Convert enum to its string value
+                cleaned[key] = value.value
             else:
                 cleaned[key] = value
         

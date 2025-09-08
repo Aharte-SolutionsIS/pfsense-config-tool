@@ -1,3 +1,4 @@
+.gitignore
 CHANGELOG.md
 Makefile
 README.md
@@ -5,6 +6,11 @@ pyproject.toml
 requirements.txt
 setup.py
 .claude/settings.local.json
+pfSense REST API Documentation_files/index.css
+pfSense REST API Documentation_files/swagger-initializer.js.download
+pfSense REST API Documentation_files/swagger-ui-bundle.js.download
+pfSense REST API Documentation_files/swagger-ui-standalone-preset.js.download
+pfSense REST API Documentation_files/swagger-ui.css
 pfsense_cli/__init__.py
 pfsense_cli.egg-info/PKG-INFO
 pfsense_cli.egg-info/SOURCES.txt
