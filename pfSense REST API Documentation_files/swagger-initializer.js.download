@@ -1,0 +1,18 @@
+window.onload = function() {
+        document.title = "pfSense REST API Documentation";
+        window.ui = SwaggerUIBundle({
+        url: "/api-docs/openapi.json",
+        dom_id: "#swagger-ui",
+        deepLinking: true,
+        presets: [
+          SwaggerUIBundle.presets.apis,
+          SwaggerUIStandalonePreset
+        ],
+        plugins: [
+          SwaggerUIBundle.plugins.DownloadUrl
+        ],
+        layout: "StandaloneLayout",
+        supportedSubmitMethods: [],
+        validatorUrl: null
+      });
+    };
