@@ -144,6 +144,8 @@ class PfSenseAPIClient:
                 for auth_data in auth_formats:
                     try:
                         logger.debug(f"Trying auth data format: {list(auth_data.keys())}")
+                        logger.debug(f"Auth data values: {auth_data}")
+                        logger.debug(f"Full URL: {auth_url}")
                         response = self.session.post(
                             auth_url,
                             json=auth_data,
