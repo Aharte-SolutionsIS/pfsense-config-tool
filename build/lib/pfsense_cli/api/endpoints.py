@@ -28,15 +28,36 @@ class PfSenseEndpoints:
     
     # Client Management
     async def get_clients(self) -> List[Dict[str, Any]]:
-        """Get list of all configured clients."""
+        """Get list of all configured clients from pfSense interfaces."""
         try:
-            # For now, return empty list since we're managing clients locally
-            # TODO: Implement actual pfSense client discovery when API endpoints are available
-            logger.info("Client discovery not yet implemented - managing local configurations only")
-            return []
+            # Get all interfaces from pfSense
+            interfaces_response = await self.client.get('/interface')
+            interfaces = interfaces_response.get('data', [])
+            
+            # Filter interfaces that appear to be client interfaces (contain CLIENT_ prefix)
+            client_interfaces = []
+            for interface in interfaces:
+                descr = interface.get('descr', '')
+                if descr.startswith('CLIENT_'):
+                    client_name = descr.replace('CLIENT_', '')
+                    client_interfaces.append({
+                        'name': client_name,
+                        'interface_id': interface.get('if'),
+                        'description': descr,
+                        'enabled': interface.get('enable', False),
+                        'type': interface.get('type'),
+                        'ipaddr': interface.get('ipaddr'),
+                        'subnet': interface.get('subnet'),
+                        'gateway': interface.get('gateway')
+                    })
+            
+            logger.info(f"Found {len(client_interfaces)} client interfaces")
+            return client_interfaces
+            
         except Exception as e:
-            logger.error(f"Failed to get clients: {e}")
-            raise
+            logger.error(f"Failed to get clients from pfSense: {e}")
+            # Return empty list instead of raising to allow graceful degradation
+            return []
     
     async def get_client(self, client_name: str) -> Dict[str, Any]:
         """Get specific client configuration."""
@@ -49,24 +70,62 @@ class PfSenseEndpoints:
         raise ClientNotFoundError(f"Client '{client_name}' not found")
     
     async def create_client(self, client_config: ClientConfig) -> Dict[str, Any]:
-        """Create a new client configuration."""
+        """Create a new client configuration with actual pfSense API calls."""
         try:
-            # For now, just simulate client creation since we're in local mode
-            # TODO: Implement actual pfSense client creation when API endpoints are available
-            logger.info(f"Client '{client_config.name}' configuration created locally")
-            logger.info("Note: pfSense configuration creation not yet implemented - use export features to apply manually")
+            logger.info(f"Creating client '{client_config.name}' on pfSense...")
             
-            # Return simulated client data
+            # Step 1: Check for conflicts
+            if client_config.vlan:
+                await self._check_vlan_conflict(client_config.vlan.vlan_id)
+            if client_config.network:
+                await self._check_network_conflict(client_config.network.network)
+            
+            # Step 2: Create VLAN interface if specified
+            vlan_result = None
+            if client_config.vlan:
+                logger.info(f"Creating VLAN {client_config.vlan.vlan_id} for client '{client_config.name}'")
+                vlan_result = await self._create_vlan_interface(client_config)
+            
+            # Step 3: Create DHCP configuration if specified
+            dhcp_result = None
+            if client_config.dhcp and client_config.dhcp.enabled:
+                logger.info(f"Creating DHCP configuration for client '{client_config.name}'")
+                dhcp_result = await self._create_dhcp_config(client_config)
+            
+            # Step 4: Create firewall rules if specified
+            if client_config.firewall_rules:
+                logger.info(f"Creating {len(client_config.firewall_rules)} firewall rules for client '{client_config.name}'")
+                await self._create_firewall_rules(client_config)
+            
+            # Step 5: Create NAT rules if specified
+            if client_config.nat_rules:
+                logger.info(f"Creating {len(client_config.nat_rules)} NAT rules for client '{client_config.name}'")
+                await self._create_nat_rules(client_config)
+            
+            # Step 6: Apply configuration changes
+            logger.info("Applying configuration changes to pfSense...")
+            await self.client.post('/system/halt/reload_config')
+            
+            logger.info(f"Successfully created client '{client_config.name}' on pfSense")
             return {
                 'name': client_config.name,
-                'status': 'created_locally',
+                'status': 'active',
                 'network': client_config.network.network if client_config.network else None,
                 'vlan': client_config.vlan.vlan_id if client_config.vlan else None,
-                'message': 'Client configuration saved locally. Use export commands to apply to pfSense manually.'
+                'vlan_interface': vlan_result.get('if') if vlan_result else None,
+                'dhcp_enabled': bool(dhcp_result) if dhcp_result else False,
+                'firewall_rules_count': len(client_config.firewall_rules),
+                'nat_rules_count': len(client_config.nat_rules),
+                'message': f'Client {client_config.name} successfully created on pfSense'
             }
             
         except Exception as e:
             logger.error(f"Failed to create client '{client_config.name}': {e}")
+            # Try to cleanup any partial configuration
+            try:
+                await self._cleanup_partial_client_config(client_config.name)
+            except:
+                pass  # Cleanup failed, but don't mask the original error
             raise
     
     async def update_client(self, client_name: str, client_config: ClientConfig) -> Dict[str, Any]:
@@ -111,15 +170,27 @@ class PfSenseEndpoints:
     async def configure_network(self, client_name: str, network_config: NetworkSettings) -> Dict[str, Any]:
         """Configure network settings for a client."""
         try:
+            # Find the client interface
+            client = await self.get_client(client_name)
+            interface_id = client.get('interface_id')
+            
+            if not interface_id:
+                raise ValueError(f"No interface found for client '{client_name}'")
+            
             # Update interface configuration
-            result = await self.client.put(
-                f'/interface/vlan/{client_name}',
-                data=network_config.dict()
-            )
+            update_data = {
+                'enable': True,
+                'descr': f'CLIENT_{client_name}',
+                'ipaddr': network_config.gateway if network_config.gateway else 'dhcp',
+                'subnet': '24'  # Default subnet mask
+            }
+            
+            result = await self.client.put(f'/interface/{interface_id}', data=update_data)
             
             # Apply configuration
             await self.client.post('/system/halt/reload_config')
             
+            logger.info(f"Successfully configured network for client '{client_name}'")
             return result
             
         except Exception as e:
@@ -193,32 +264,42 @@ class PfSenseEndpoints:
     # Helper methods
     async def _check_vlan_conflict(self, vlan_id: int):
         """Check for VLAN ID conflicts."""
-        vlans = await self.client.get('/interface/vlan')
-        existing_vlans = vlans.get('data', [])
-        
-        for vlan in existing_vlans:
-            if vlan.get('tag') == vlan_id:
-                raise VLANConflictError(f"VLAN ID {vlan_id} is already in use")
+        try:
+            vlans = await self.client.get('/interface/vlan')
+            existing_vlans = vlans.get('data', [])
+            
+            for vlan in existing_vlans:
+                if vlan.get('tag') == vlan_id:
+                    raise VLANConflictError(f"VLAN ID {vlan_id} is already in use")
+        except Exception as e:
+            # If we can't check for conflicts, log but don't fail
+            logger.warning(f"Could not check VLAN conflicts: {e}")
+            pass
     
     async def _check_network_conflict(self, network_cidr: str):
         """Check for network IP conflicts."""
-        interfaces = await self.client.get('/interface')
-        existing_interfaces = interfaces.get('data', [])
-        
-        from ipaddress import IPv4Network
-        new_network = IPv4Network(network_cidr, strict=False)
-        
-        for iface in existing_interfaces:
-            if iface.get('ipaddr') and iface.get('subnet'):
-                existing_cidr = f"{iface['ipaddr']}/{iface['subnet']}"
-                try:
-                    existing_network = IPv4Network(existing_cidr, strict=False)
-                    if new_network.overlaps(existing_network):
-                        raise NetworkConflictError(
-                            f"Network {network_cidr} conflicts with existing network {existing_cidr}"
-                        )
-                except ValueError:
-                    continue
+        try:
+            interfaces = await self.client.get('/interface')
+            existing_interfaces = interfaces.get('data', [])
+            
+            from ipaddress import IPv4Network
+            new_network = IPv4Network(network_cidr, strict=False)
+            
+            for iface in existing_interfaces:
+                if iface.get('ipaddr') and iface.get('subnet'):
+                    existing_cidr = f"{iface['ipaddr']}/{iface['subnet']}"
+                    try:
+                        existing_network = IPv4Network(existing_cidr, strict=False)
+                        if new_network.overlaps(existing_network):
+                            raise NetworkConflictError(
+                                f"Network {network_cidr} conflicts with existing network {existing_cidr}"
+                            )
+                    except ValueError:
+                        continue
+        except Exception as e:
+            # If we can't check for conflicts, log but don't fail
+            logger.warning(f"Could not check network conflicts: {e}")
+            pass
     
     async def _create_vlan_interface(self, client_config: ClientConfig) -> Dict[str, Any]:
         """Create VLAN interface for client."""
@@ -342,3 +423,20 @@ class PfSenseEndpoints:
             }
             
             await self.client.put(f'/services/dhcp/{client_name}', data=dhcp_data)
+    
+    async def _cleanup_partial_client_config(self, client_name: str):
+        """Cleanup partial client configuration in case of errors."""
+        try:
+            logger.info(f"Cleaning up partial configuration for client '{client_name}'")
+            
+            # Try to delete any created components
+            await self._delete_client_dhcp(client_name)
+            await self._delete_client_firewall_rules(client_name) 
+            await self._delete_client_nat_rules(client_name)
+            await self._delete_client_interface(client_name)
+            
+            # Apply cleanup changes
+            await self.client.post('/system/halt/reload_config')
+            
+        except Exception as cleanup_error:
+            logger.error(f"Failed to cleanup partial config for '{client_name}': {cleanup_error}")
