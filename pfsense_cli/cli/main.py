@@ -139,14 +139,28 @@ def status(ctx):
         from .utils import get_api_client
         ctx.api_client = get_api_client(ctx)
         
-        async def get_status():
-            health = await ctx.api_client.health_check()
-            if health['connected']:
-                system_info = await ctx.api_client.get_system_info()
-                return health, system_info
-            return health, None
+        # Authenticate synchronously first
+        ctx.api_client.authenticate()
         
-        health, system_info = asyncio.run(get_status())
+        # Then run async operations
+        async def get_status():
+            try:
+                health = await ctx.api_client.health_check()
+                if health['connected']:
+                    system_info = await ctx.api_client.get_system_info()
+                    return health, system_info
+                return health, None
+            except Exception as e:
+                logger.error(f"Status check failed: {e}")
+                return {'connected': False, 'error': str(e)}, None
+        
+        # Create new event loop to avoid conflicts
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            health, system_info = loop.run_until_complete(get_status())
+        finally:
+            loop.close()
         
         click.echo("pfSense Connection Status")
         click.echo("=" * 25)

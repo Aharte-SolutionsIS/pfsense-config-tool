@@ -111,13 +111,14 @@ class PfSenseAPIClient:
         
         logger.info(f"Initialized pfSense API client for {self.base_url}")
     
-    async def authenticate(self) -> bool:
+    def authenticate(self) -> bool:
         """
         Authenticate with pfSense API and obtain access token.
         
         Returns:
             True if authentication successful, False otherwise
         """
+        logger.info("Starting authentication process...")
         try:
             # Try different API versions and endpoints based on pfSense REST API v2.6.0 docs
             auth_endpoints = [
@@ -144,7 +145,7 @@ class PfSenseAPIClient:
                         response = self.session.post(
                             auth_url,
                             auth=HTTPBasicAuth(self.username, self.password),
-                            timeout=self.timeout
+                            timeout=10  # Use a shorter timeout for auth
                         )
                         
                         if response.status_code == 200:
@@ -171,7 +172,7 @@ class PfSenseAPIClient:
                         response = self.session.post(
                             auth_url,
                             json=auth_data,
-                            timeout=self.timeout
+                            timeout=10  # Use a shorter timeout for auth
                         )
                         
                         if response.status_code == 200:
@@ -258,27 +259,35 @@ class PfSenseAPIClient:
     async def _ensure_authenticated(self):
         """Ensure we have a valid authentication token."""
         if not self._auth_token or self._is_token_expired():
-            await self.authenticate()
+            logger.debug("Token missing or expired, re-authenticating...")
+            self.authenticate()
         
         # Update headers based on authentication type
         if self._auth_token and self._auth_token != "session-based":
+            auth_header = f'Bearer {self._auth_token}'
             self.session.headers.update({
-                'Authorization': f'Bearer {self._auth_token}',
+                'Authorization': auth_header,
                 'Content-Type': 'application/json'
             })
+            logger.debug(f"Set authorization header: Bearer token (length: {len(self._auth_token)})")
         else:
             # For session-based auth, just ensure Content-Type is set
             self.session.headers.update({
                 'Content-Type': 'application/json'
             })
+            logger.debug("Using session-based authentication")
     
     def _build_url(self, endpoint: str) -> str:
         """Build full URL for API endpoint."""
         if not endpoint.startswith('/'):
             endpoint = f'/{endpoint}'
         
-        if not endpoint.startswith('/api/'):
-            endpoint = f'/api/v2{endpoint}'
+        # Don't modify paths that already include /api/
+        if endpoint.startswith('/api/'):
+            return urljoin(self.base_url, endpoint)
+        
+        # For other paths, add /api/v2 prefix
+        endpoint = f'/api/v2{endpoint}'
         
         return urljoin(self.base_url, endpoint)
     
@@ -312,6 +321,9 @@ class PfSenseAPIClient:
                 data
             )
         elif response.status_code == 401:
+            logger.debug(f"Authentication failed for URL: {response.url}")
+            logger.debug(f"Response data: {data}")
+            logger.debug(f"Request headers: {response.request.headers}")
             raise AuthenticationError(
                 data.get('message', 'Authentication required'),
                 response.status_code,

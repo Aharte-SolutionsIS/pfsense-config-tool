@@ -48,14 +48,15 @@ Requires-Dist: mkdocs-material>=9.0.0; extra == "docs"
 
 # pfSense Configuration Management CLI Tool
 
-A professional automation CLI tool for managing pfSense configurations including client management, network operations, and VPN setup.
+A professional automation CLI tool that directly manages pfSense configurations through the REST API v2.6.0, providing real-time configuration changes for client management, network operations, and VPN setup.
 
 ## Features
 
 ### 🔧 Core Functionality
-- **Client Management**: Add, remove, list, and manage client configurations
-- **Network Operations**: Configure VLANs, DHCP, NAT rules, and firewall rules
-- **VPN Management**: Setup OpenVPN servers and manage client certificates
+- **Client Management**: Add, remove, list, and manage client configurations directly in pfSense
+- **Network Operations**: Create and configure VLANs, DHCP servers, NAT rules, and firewall rules in real-time
+- **VPN Management**: Setup OpenVPN servers and manage client certificates on your pfSense instance
+- **Live API Integration**: All changes are immediately applied to your pfSense system via REST API v2.6.0
 - **Configuration Templates**: YAML-based templates for different client types
 - **Backup & Restore**: Automatic configuration backups with retention policies
 
@@ -72,50 +73,80 @@ A professional automation CLI tool for managing pfSense configurations including
 - API authentication with token refresh
 - Input validation and sanitization
 
+## Prerequisites
+
+### pfSense Requirements
+- **pfSense Version**: 2.5.0 or later (tested with 2.8.1)
+- **REST API Package**: pfSense REST API v2.6.0 must be installed
+  - Install via: System > Package Manager > Available Packages > "pfSense-pkg-API"
+  - Enable via: System > API > Enable API
+- **Admin Access**: User account with administrative privileges
+
+### Python Requirements
+- Python 3.8 or later
+- pip package manager
+
 ## Quick Start
 
 ### Installation
 
-```bash
+```powershell
 # Clone the repository
 git clone <repository-url>
 cd pfsense-config-tool
 
 # Install dependencies
-pip install -r requirements.txt
+python -m pip install -r requirements.txt
 
 # Install the package
-pip install -e .
+python -m pip install -e .
+
+# Or install from wheel
+python -m pip install dist/pfsense_cli-1.0.0-py3-none-any.whl
 ```
 
 ### Initial Setup
 
-```bash
-# Run the setup wizard
-pfsense-cli setup
+```powershell
+# Configure your pfSense connection (PowerShell)
+$env:PFSENSE_URL = "https://192.168.1.1"  # Your pfSense IP
+$env:PFSENSE_USERNAME = "admin"
+$env:PFSENSE_PASSWORD = "your-password"
 
-# Test connection
+# Test connection to pfSense
 pfsense-cli status
+
+# Or configure via config file
+pfsense-cli set-config pfsense.base_url https://192.168.1.1
+pfsense-cli set-config pfsense.username admin
+pfsense-cli set-config pfsense.password your-password
 ```
+
+**Note:** Ensure pfSense REST API v2.6.0 is installed and enabled on your pfSense system.
 
 ### Basic Usage
 
-```bash
-# Add a new client
-pfsense-cli client add --name "AcmeCorp" --network "192.168.50.0/24" --vlan 150
+```powershell
+# Add a new client (creates VLAN, interface, DHCP, and firewall rules in pfSense)
+pfsense-cli client add --name "AcmeCorp" --network "192.168.50.0/24" --vlan 150 --dhcp-start "192.168.50.100" --dhcp-end "192.168.50.200"
 
-# Configure network settings
-pfsense-cli network configure --client "AcmeCorp" --gateway "192.168.50.1"
-
-# Setup VPN
-pfsense-cli vpn setup --client "AcmeCorp" --port 1194
-
-# List all clients
+# List all clients configured in pfSense
 pfsense-cli client list
 
-# Show client status
+# Show client status from pfSense
 pfsense-cli client status AcmeCorp
+
+# Configure network settings (updates live pfSense configuration)
+pfsense-cli network configure --client "AcmeCorp" --gateway "192.168.50.1"
+
+# Setup VPN (creates OpenVPN server in pfSense)
+pfsense-cli vpn setup --client "AcmeCorp" --port 1194
+
+# Remove client (removes all associated pfSense configurations)
+pfsense-cli client remove AcmeCorp
 ```
+
+**Important:** All commands make immediate changes to your pfSense system. Changes are visible in the pfSense WebUI instantly.
 
 ## Configuration
 
@@ -167,7 +198,7 @@ vpn_port: 1194
 
 ### Client Management
 
-```bash
+```powershell
 # Add client with template
 pfsense-cli client add --name "BranchOffice" --template "branch_office" --network "192.168.60.0/24" --vlan 160
 
@@ -178,12 +209,12 @@ pfsense-cli client remove AcmeCorp
 pfsense-cli client list --status active --client-type corporate
 
 # Update client configuration
-pfsense-cli client update AcmeCorp --status active --enable-vpn
+pfsense-cli client update AcmeCorp --status active --vpn
 ```
 
 ### Network Operations
 
-```bash
+```powershell
 # Manage VLANs
 pfsense-cli network vlan create --client "AcmeCorp" --vlan-id 150
 pfsense-cli network vlan list
@@ -203,7 +234,7 @@ pfsense-cli network firewall list
 
 ### VPN Management
 
-```bash
+```powershell
 # Setup VPN server
 pfsense-cli vpn setup --client "AcmeCorp" --port 1194 --network "10.8.0.0/24"
 
@@ -223,7 +254,7 @@ pfsense-cli vpn certificates list
 
 ### Configuration Management
 
-```bash
+```powershell
 # View current configuration
 pfsense-cli config --format yaml
 
@@ -258,21 +289,36 @@ pfsense-cli client add --name "NewCorp" --template "corporate_client" --network 
 
 ## API Integration
 
-The tool provides a comprehensive pfSense REST API client:
+The tool provides direct integration with pfSense REST API v2.6.0:
+
+### Live Operations
+- **Real-time Changes**: All operations immediately affect your pfSense system
+- **WebUI Visibility**: Changes appear instantly in the pfSense web interface
+- **Configuration Apply**: Automatic configuration reload after changes
+- **Rollback Support**: Error handling with partial configuration cleanup
 
 ### Features
-- Authentication with token refresh
+- JWT authentication with pfSense REST API v2.6.0
 - Automatic retry with exponential backoff
 - Rate limiting and connection pooling
 - Comprehensive error handling
 - Response validation and parsing
 
+### Supported pfSense Operations
+- ✅ Interface creation and management
+- ✅ VLAN configuration
+- ✅ DHCP server setup
+- ✅ Firewall rule creation
+- ✅ NAT/Port forwarding rules
+- ✅ OpenVPN server configuration
+- ✅ System configuration reload
+
 ### Error Handling
 - Network connectivity issues
-- Authentication failures
+- Authentication failures (JWT token management)
 - API rate limiting
-- Invalid configurations
-- Resource conflicts
+- Invalid configurations with validation
+- Resource conflicts (VLAN/network overlap detection)
 
 ## Development
 
